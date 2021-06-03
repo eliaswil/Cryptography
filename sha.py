@@ -2,6 +2,7 @@ from typing import *
 
 
 # https://qvault.io/cryptography/how-sha-2-works-step-by-step-sha-256/
+# https://csrc.nist.gov/csrc/media/publications/fips/180/4/final/documents/fips180-4-draft-aug2014.pdf
 
 # Round Constants:
 # ----------------
@@ -42,53 +43,113 @@ def rigth_rotate(number :int, rotations :int, length :int ):
 def left_rotate(number :int, rotations :int, length :int):
     return ((number << rotations) | (number >> (length - rotations))) & ((1 << length)-1)
 
-def sha256(message :str):
+def unsigned_bitwise_not(number :int, length :int):
+    return (~number) & ((1 << length)-1)
 
-    # convert to binary
-    binary_message :int = ''.join([format(ord(c), '08b') for c in message])
 
-    # padding
 
+def pad_message(binary_message :str):
     # append a single '1'
     binary_message_padded :str = binary_message + '1'
 
-    # fill up last 'chunk' (block) of 512 with '0's
-    binary_message_padded += '0' * (block_size - len(binary_message_padded) % block_size)
+    # fill up last 'chunk' (block) of 512 with '0's until total length is a multiple of 512, minus 64 bits (= 448 bits)
+    binary_message_padded += '0' * (block_size - ((len(binary_message_padded) + 64) % block_size))
+    # add 64 bits representing the length of the original binary message
+    binary_message_padded += format(len(binary_message), '064b')
 
-    # add the lengh of the original binary intput
-    binary_0 :int = int(binary_message_padded, 2) + len(binary_message)
-    
+    # now we have definitely a multiple of 512
+    pass
+
+
+def sha256(message :str):
+
     # convert to binary
-    binary_0_string :str = format(binary_0, '0b')
+    binary_message :str = ''.join([format(ord(c), '08b') for c in message]) # each char - one byte (8 bits)
 
-    # if original binary message has leading 0s -> add zeros until it is a multiple of 512
-    if len(binary_0_string) % block_size > 0:
-        number_of_missing_zeros :int = block_size - (len(binary_0_string) % block_size)
-        binary_0_string = ('0' * number_of_missing_zeros) + binary_0_string
-
+    # padding
+    binary_message_padded = pad_message(binary_message)
     
+    
+    # --------------
     # the chunk loop
-
+    # --------------
     # for each 512-bit 'chunk' of data
-    for chung_start_index in range(0, len(binary_0_string), block_size):
+
+    for chunk_start_index in range(0, len(binary_message_padded), block_size):
         
         # create 32-bit-words
-        _32_bit_words :List[str] = [binary_0_string[word_start_index : word_start_index + 32] for word_start_index in range(chung_start_index, block_size, 32)]
+        _32_bit_words :List[str] = [binary_message_padded[word_start_index : word_start_index + 32] for word_start_index in range(chunk_start_index, chunk_start_index +block_size, 32)]
         
         # add 32-bit-words of '0's until there are 64 32-bit-words in total
         _32_bit_words += ['0' * 32] * (64 - len(_32_bit_words))
 
         # basically magic
-        for word_index in range(len(_32_bit_words)):
-            word :int = int(_32_bit_words[word_index], 2) # convert to a number
-            s0 = () # TODO
+        for word_index in range(16, len(_32_bit_words)):
+            word_15 :int = int(_32_bit_words[word_index - 15], 2) # convert words[i-15] to a number
+            word_2 :int = int(_32_bit_words[word_index - 2], 2) # convert words[i-2] to a number
+            word_16 :int = int(_32_bit_words[word_index - 16], 2) # convert words[i-16] to a number
+            word_7 :int = int(_32_bit_words[word_index - 7], 2) # convert words[i-7] to a number
 
+            s0 = (rigth_rotate(word_15, 7, 32) ^ rigth_rotate(word_15, 18, 32) ^ (word_15 >> 3))
+            s1 = (rigth_rotate(word_2, 17, 32) ^ rigth_rotate(word_2, 19, 32) ^ (word_2 >> 10))
 
+            word_i = (word_16 + s0 + word_7 + s1) % (2**32)
 
+            _32_bit_words[word_index] = format(word_i, '032b')
+            
+        # initialze variables
+        a,b,c,d,e,f,g,h = H
 
-    return 'TODO'
+        # compression
+        for i in range(64):
+
+            S1 = rigth_rotate(e, 6, 32) ^ rigth_rotate(e, 11, 32) ^ rigth_rotate(e, 25, 32)
+            ch = (e & f) ^ (unsigned_bitwise_not(e, 32) & g)
+
+            word_i = int(_32_bit_words[i], 2)
+            temp1 = (h + S1 + ch + K[i] + word_i) % (2**32)
+
+            S0 = rigth_rotate(a, 2, 32) ^ rigth_rotate(a, 13, 32) ^ rigth_rotate(a, 22, 32)
+            maj = (a & b) ^ (a & c) ^ (b & c)
+
+            temp2 = (S0 + maj) % (2**32)
+
+            h = g
+            g = f
+            f = e
+            e = (d + temp1) % (2**32)
+            d = c
+            c = b
+            b = a
+            a = (temp1 + temp2) % (2**32)
+
+            pass
+
+        # modify final values
+        H[0] = (H[0] + a) % (2**32)
+        H[1] = (H[1] + b) % (2**32)
+        H[2] = (H[2] + c) % (2**32)
+        H[3] = (H[3] + d) % (2**32)
+        H[4] = (H[4] + e) % (2**32)
+        H[5] = (H[5] + f) % (2**32)
+        H[6] = (H[6] + g) % (2**32)
+        H[7] = (H[7] + h) % (2**32)
+
+        pass
+
+    # concatenate final hash
+    digest :str = ''.join(format(x, '08x') for x in H)
+
+    return digest
 
 if __name__ == "__main__":
-    message = 'hello world'
+
+    # BUG: 0 < len <= 55 --> working, len >= 56 --> not working
+
+    message = 'abc'
     hashed_message = sha256(message)
-    print('\n\nhashed_message: ', hashed_message)
+    print('hashed_message: ', hashed_message)
+
+
+
+
