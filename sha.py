@@ -144,8 +144,6 @@ def sha256(message :str):
 
 if __name__ == "__main__":
 
-    # BUG: 0 < len <= 55 --> working, len >= 56 --> not working
-
     message = 'abc'
     hashed_message = sha256(message)
     print('hashed_message: ', hashed_message)
